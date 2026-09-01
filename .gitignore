@@ -206,6 +206,8 @@ temp/
 data/raw/
 data/processed/
 data/output/
+output/
+
 
 # Large generated 3D / media files
 

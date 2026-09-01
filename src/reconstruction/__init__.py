@@ -5,7 +5,7 @@ Transforms visual observations and camera localization into 3D representations.
 """
 
 from .engine import DefaultReconstructionEngine, MultiViewTriangulator, ReconstructionEngineBase
-from .geometry import PlyIO, PointCloudProcessor
+from .geometry import PlyIO, PointCloudProcessor, SurfaceMesher
 from .input import S2InputLoader, S2InputValidator, ValidationReport
 from .models import (
     BoundingBox3D,
@@ -13,6 +13,7 @@ from .models import (
     CameraPose,
     FeatureObservation,
     LocalizationInfo,
+    MeshData,
     PointCloudData,
     ReconstructionQuality,
     S2Observation,
@@ -40,6 +41,7 @@ __all__ = [
     "PreparedReconstructionData",
     "PlyIO",
     "PointCloudProcessor",
+    "SurfaceMesher",
     "QualityEvaluator",
     "S3FailureReason",
     "S3ReconstructionError",
@@ -51,6 +53,7 @@ __all__ = [
     "S2Observation",
     "S2Payload",
     "BoundingBox3D",
+    "MeshData",
     "SpatialReference",
     "ReconstructionQuality",
     "PointCloudData",

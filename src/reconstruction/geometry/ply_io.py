@@ -2,18 +2,18 @@
 S3 PLY File I/O
 
 High-performance read/write operations for standard Stanford PLY point clouds
-in both ASCII and binary little-endian formats.
+and surface meshes in both ASCII and binary little-endian formats.
 """
 
 from pathlib import Path
 from typing import Optional, Tuple, Union
 import numpy as np
 
-from ..models.s3_output import PointCloudData
+from ..models.s3_output import MeshData, PointCloudData
 
 
 class PlyIO:
-    """Read and write Stanford PLY files for 3D point clouds."""
+    """Read and write Stanford PLY files for 3D point clouds and meshes."""
 
     @staticmethod
     def write_ply(
@@ -125,6 +125,124 @@ class PlyIO:
                     f.write(" ".join(line_parts) + "\n")
 
     @staticmethod
+    def write_mesh_ply(
+        file_path: Union[str, Path],
+        mesh: MeshData,
+        binary: bool = True,
+    ) -> None:
+        """
+        Write MeshData (vertices and triangular faces) to a .ply file.
+
+        Parameters:
+            file_path: Destination path for mesh .ply file.
+            mesh: MeshData instance.
+            binary: If True, writes binary format; else ASCII.
+        """
+        path = Path(file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        vertices = mesh.vertices
+        faces = mesh.faces
+        n_vertices = vertices.shape[0]
+        n_faces = faces.shape[0]
+
+        has_colors = mesh.vertex_colors is not None
+        has_normals = mesh.normals is not None
+
+        header_lines = [
+            "ply",
+            "format binary_little_endian 1.0" if binary else "format ascii 1.0",
+            "comment Matrix SIH2026 S3 Surface Mesh",
+            f"element vertex {n_vertices}",
+            "property float x",
+            "property float y",
+            "property float z",
+        ]
+
+        if has_normals:
+            header_lines.extend([
+                "property float nx",
+                "property float ny",
+                "property float nz",
+            ])
+
+        if has_colors:
+            header_lines.extend([
+                "property uchar red",
+                "property uchar green",
+                "property uchar blue",
+            ])
+
+        header_lines.extend([
+            f"element face {n_faces}",
+            "property list uchar int vertex_indices",
+            "end_header\n",
+        ])
+
+        header_text = "\n".join(header_lines)
+
+        if binary:
+            # Vertex records
+            dtype_fields = [("x", "<f4"), ("y", "<f4"), ("z", "<f4")]
+            if has_normals:
+                dtype_fields.extend([("nx", "<f4"), ("ny", "<f4"), ("nz", "<f4")])
+            if has_colors:
+                dtype_fields.extend([("red", "u1"), ("green", "u1"), ("blue", "u1")])
+
+            v_arr = np.empty(n_vertices, dtype=dtype_fields)
+            v_arr["x"] = vertices[:, 0].astype(np.float32)
+            v_arr["y"] = vertices[:, 1].astype(np.float32)
+            v_arr["z"] = vertices[:, 2].astype(np.float32)
+
+            if has_normals:
+                v_arr["nx"] = mesh.normals[:, 0].astype(np.float32)
+                v_arr["ny"] = mesh.normals[:, 1].astype(np.float32)
+                v_arr["nz"] = mesh.normals[:, 2].astype(np.float32)
+
+            if has_colors:
+                v_arr["red"] = mesh.vertex_colors[:, 0].astype(np.uint8)
+                v_arr["green"] = mesh.vertex_colors[:, 1].astype(np.uint8)
+                v_arr["blue"] = mesh.vertex_colors[:, 2].astype(np.uint8)
+
+            # Face records: count (uchar) + 3 indices (int32)
+            face_dtype = np.dtype([("count", "u1"), ("v0", "<i4"), ("v1", "<i4"), ("v2", "<i4")])
+            f_arr = np.empty(n_faces, dtype=face_dtype)
+            f_arr["count"] = 3
+            f_arr["v0"] = faces[:, 0].astype(np.int32)
+            f_arr["v1"] = faces[:, 1].astype(np.int32)
+            f_arr["v2"] = faces[:, 2].astype(np.int32)
+
+            with open(path, "wb") as f:
+                f.write(header_text.encode("ascii"))
+                v_arr.tofile(f)
+                f_arr.tofile(f)
+        else:
+            with open(path, "w", encoding="ascii") as f:
+                f.write(header_text)
+                for i in range(n_vertices):
+                    line_parts = [
+                        f"{vertices[i, 0]:.6f}",
+                        f"{vertices[i, 1]:.6f}",
+                        f"{vertices[i, 2]:.6f}",
+                    ]
+                    if has_normals:
+                        line_parts.extend([
+                            f"{mesh.normals[i, 0]:.6f}",
+                            f"{mesh.normals[i, 1]:.6f}",
+                            f"{mesh.normals[i, 2]:.6f}",
+                        ])
+                    if has_colors:
+                        line_parts.extend([
+                            str(int(mesh.vertex_colors[i, 0])),
+                            str(int(mesh.vertex_colors[i, 1])),
+                            str(int(mesh.vertex_colors[i, 2])),
+                        ])
+                    f.write(" ".join(line_parts) + "\n")
+
+                for j in range(n_faces):
+                    f.write(f"3 {faces[j, 0]} {faces[j, 1]} {faces[j, 2]}\n")
+
+    @staticmethod
     def read_ply(file_path: Union[str, Path]) -> PointCloudData:
         """
         Read a .ply point cloud file into PointCloudData.
@@ -153,9 +271,10 @@ class PlyIO:
                     is_binary = True
                 elif line.startswith("element vertex"):
                     num_vertices = int(line.split()[-1])
-                elif line.startswith("property"):
+                elif line.startswith("property") and "element vertex" in "".join(header_lines):
                     parts = line.split()
-                    properties.append((parts[1], parts[2]))
+                    if len(parts) >= 3 and parts[1] != "list":
+                        properties.append((parts[1], parts[2]))
                 elif line == "end_header":
                     break
 
@@ -227,4 +346,3 @@ class PlyIO:
                     colors = data_matrix[:, [r_idx, g_idx, b_idx]].astype(np.uint8)
 
                 return PointCloudData(points=points, colors=colors)
-

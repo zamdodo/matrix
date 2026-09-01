@@ -40,18 +40,27 @@ class S3OutputPackager:
         ply_path = out_dir / "scene.ply"
         meta_path = out_dir / "metadata.json"
 
-        # 1. Write PLY geometry
+        # 1. Write PLY point cloud geometry
         PlyIO.write_ply(ply_path, result.point_cloud, binary=binary_ply)
 
-        # 2. Write JSON metadata
+        artifacts = {
+            "ply": ply_path,
+            "metadata": meta_path,
+        }
+
+        # 2. Write surface mesh if available
+        if result.mesh is not None and result.mesh.num_faces > 0:
+            mesh_path = out_dir / "mesh.ply"
+            PlyIO.write_mesh_ply(mesh_path, result.mesh, binary=binary_ply)
+            artifacts["mesh"] = mesh_path
+
+        # 3. Write JSON metadata
         meta_dict = result.to_metadata_dict()
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta_dict, f, indent=2)
 
-        return {
-            "ply": ply_path,
-            "metadata": meta_path,
-        }
+        return artifacts
+
 
     @staticmethod
     def to_s4_input(result: S3ReconstructionResult):

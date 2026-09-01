@@ -116,14 +116,37 @@ class Reconstructor:
 
     def reconstruct(self):
         """Generate the S4-compatible 3D reconstruction."""
+        # Check if visual_data is an S2Payload or dict with observations
+        from .models.schema import S2Payload
+        from .pipeline import S3ReconstructionPipeline
+
+        if isinstance(self.visual_data, S2Payload) or (isinstance(self.visual_data, dict) and "observations" in self.visual_data):
+            pipeline = S3ReconstructionPipeline()
+            result = pipeline.run(self.visual_data)
+            return {
+                "point_cloud": result.point_cloud.points.tolist(),
+                "mesh": result.mesh.to_dict() if result.mesh is not None else None,
+                "metadata": result.to_metadata_dict(),
+            }
+
         point_cloud = self._build_point_cloud()
+        mesh_dict = None
+
+        if len(point_cloud) >= 3:
+            from .geometry.mesher import SurfaceMesher
+            from .models.s3_output import PointCloudData
+            cloud_obj = PointCloudData(points=np.array(point_cloud, dtype=float))
+            mesh_obj = SurfaceMesher().generate_mesh(cloud_obj)
+            if mesh_obj is not None:
+                mesh_dict = mesh_obj.to_dict()
 
         return {
             "point_cloud": point_cloud,
-            "mesh": None,
+            "mesh": mesh_dict,
             "metadata": {
                 "num_points": len(point_cloud),
                 "source": "S1 visual observations + S2 camera localization",
                 "reconstruction_method": "triangulation-ready",
             },
         }
+

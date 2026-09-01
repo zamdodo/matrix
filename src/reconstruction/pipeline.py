@@ -13,6 +13,7 @@ import numpy as np
 
 from .engine.base import ReconstructionEngineBase
 from .engine.reconstruct import DefaultReconstructionEngine
+from .geometry.mesher import SurfaceMesher
 from .geometry.pointcloud import PointCloudProcessor
 from .input.loader import S2InputLoader
 from .input.validator import S2InputValidator
@@ -33,6 +34,7 @@ class S3ReconstructionPipeline:
         engine: Optional[ReconstructionEngineBase] = None,
         max_reprojection_error_px: float = 3.0,
         filter_statistical_outliers: bool = True,
+        generate_mesh: bool = True,
         check_image_files: bool = False,
     ) -> None:
         """
@@ -42,6 +44,7 @@ class S3ReconstructionPipeline:
             engine: Optional custom reconstruction engine instance.
             max_reprojection_error_px: Threshold for reprojection error filtering.
             filter_statistical_outliers: If True, applies statistical outlier removal.
+            generate_mesh: If True, generates a 3D surface mesh from the point cloud.
             check_image_files: If True, verifies image files on disk during input validation.
         """
         self.loader = S2InputLoader()
@@ -50,10 +53,12 @@ class S3ReconstructionPipeline:
         self.engine = engine if engine is not None else DefaultReconstructionEngine(
             max_reprojection_error_px=max_reprojection_error_px
         )
+        self.mesher = SurfaceMesher()
         self.quality_evaluator = QualityEvaluator(
             max_acceptable_mean_reproj_px=max_reprojection_error_px
         )
         self.filter_statistical_outliers = filter_statistical_outliers
+        self.generate_mesh = generate_mesh
 
     def run(
         self,
@@ -72,7 +77,7 @@ class S3ReconstructionPipeline:
             raise_on_invalid_input: If True, raises ValueError upon validation failure.
 
         Returns:
-            S3ReconstructionResult containing point cloud, quality, and metadata.
+            S3ReconstructionResult containing point cloud, mesh, quality, and metadata.
         """
         start_time = time.perf_counter()
 
@@ -105,6 +110,7 @@ class S3ReconstructionPipeline:
                 job_id=job_id,
                 status=S3Status.INVALID_INPUT,
                 point_cloud=empty_cloud,
+                mesh=None,
                 quality=empty_quality,
                 failure_info="; ".join(val_report.errors),
                 metadata={"validation_errors": val_report.errors, "validation_warnings": val_report.warnings},
@@ -124,6 +130,11 @@ class S3ReconstructionPipeline:
 
         if self.filter_statistical_outliers and point_cloud.num_points > 15:
             point_cloud = PointCloudProcessor.statistical_outlier_removal(point_cloud)
+
+        # 5b. Surface Mesh Generation
+        mesh = None
+        if self.generate_mesh and point_cloud.num_points >= 3:
+            mesh = self.mesher.generate_mesh(point_cloud)
 
         # 6. Quality Assessment & Status Classification
         elapsed = time.perf_counter() - start_time
@@ -148,6 +159,7 @@ class S3ReconstructionPipeline:
             job_id=job_id,
             status=status,
             point_cloud=point_cloud,
+            mesh=mesh,
             spatial_reference=spatial_ref,
             quality=quality,
             failure_info=failure_info,
@@ -162,4 +174,5 @@ class S3ReconstructionPipeline:
             S3OutputPackager.package_to_directory(result, output_directory)
 
         return result
+
 
